@@ -1,4 +1,4 @@
-﻿// Copyright © 2017-2026 QL-Win Contributors
+// Copyright © 2017-2026 QL-Win Contributors
 //
 // This file is part of QuickLook program.
 //
@@ -51,6 +51,7 @@ public partial class ViewerPanel : UserControl, IDisposable, INotifyPropertyChan
     private DispatcherTimer _lyricTimer;
     private LrcLine[] _lyricLines;
     private MidiPlayer _midiPlayer;
+    private Window _parentWindow;
 
     private bool _hasVideo;
     private bool _isPlaying;
@@ -110,6 +111,9 @@ public partial class ViewerPanel : UserControl, IDisposable, INotifyPropertyChan
         };
 
         PreviewMouseWheel += (_, e) => ChangeVolume(e.Delta / 120d * 0.04d);
+
+        Loaded += ViewerPanel_Loaded;
+        Unloaded += ViewerPanel_Unloaded;
     }
 
     private partial void LoadAndInsertGlassLayer();
@@ -172,6 +176,8 @@ public partial class ViewerPanel : UserControl, IDisposable, INotifyPropertyChan
 
     public void Dispose()
     {
+        DetachParentWindowEvents();
+
         // old plugin use an int-typed "Volume" config key ranged from 0 to 100. Let's use a new one here.
         SettingHelper.Set("VolumeDouble", LinearVolume, "QuickLook.Plugin.VideoViewer");
         SettingHelper.Set("ShouldLoop", ShouldLoop, "QuickLook.Plugin.VideoViewer");
@@ -197,6 +203,88 @@ public partial class ViewerPanel : UserControl, IDisposable, INotifyPropertyChan
         _lyricLines = null;
         _midiPlayer?.Dispose();
         _midiPlayer = null;
+    }
+
+    private void ViewerPanel_Loaded(object sender, RoutedEventArgs e)
+    {
+        DetachParentWindowEvents();
+
+        _parentWindow = Window.GetWindow(this);
+        if (_parentWindow != null)
+            _parentWindow.PreviewKeyDown += ParentWindow_PreviewKeyDown;
+    }
+
+    private void ViewerPanel_Unloaded(object sender, RoutedEventArgs e)
+    {
+        DetachParentWindowEvents();
+    }
+
+    private void DetachParentWindowEvents()
+    {
+        if (_parentWindow != null)
+        {
+            _parentWindow.PreviewKeyDown -= ParentWindow_PreviewKeyDown;
+            _parentWindow = null;
+        }
+    }
+
+    private void ParentWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (mediaElement == null || mediaElement.Source == null)
+            return;
+
+        bool isRightShiftOnly =
+            Keyboard.IsKeyDown(Key.RightShift) &&
+            !Keyboard.IsKeyDown(Key.LeftShift) &&
+            !Keyboard.IsKeyDown(Key.LeftCtrl) &&
+            !Keyboard.IsKeyDown(Key.RightCtrl) &&
+            !Keyboard.IsKeyDown(Key.LeftAlt) &&
+            !Keyboard.IsKeyDown(Key.RightAlt) &&
+            !Keyboard.IsKeyDown(Key.LWin) &&
+            !Keyboard.IsKeyDown(Key.RWin);
+
+        if (!isRightShiftOnly)
+            return;
+
+        switch (e.Key)
+        {
+            case Key.Left:
+                SeekBySeconds(-3d);
+                ShowViedoControlContainer(null, null);
+                e.Handled = true;
+                break;
+
+            case Key.Right:
+                SeekBySeconds(3d);
+                ShowViedoControlContainer(null, null);
+                e.Handled = true;
+                break;
+
+            case Key.Space:
+                if (!e.IsRepeat)
+                {
+                    TogglePlayPause(this, EventArgs.Empty);
+                    ShowViedoControlContainer(null, null);
+                }
+                e.Handled = true;
+                break;
+        }
+    }
+
+    private void SeekBySeconds(double seconds)
+    {
+        if (mediaElement == null || mediaElement.Source == null)
+            return;
+
+        long targetPosition = mediaElement.MediaPosition + TimeSpan.FromSeconds(seconds).Ticks;
+        if (targetPosition < 0L)
+            targetPosition = 0L;
+
+        long duration = mediaElement.MediaDuration;
+        if (duration > 0L && targetPosition > duration)
+            targetPosition = duration;
+
+        mediaElement.MediaPosition = targetPosition;
     }
 
     private void Panel_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
