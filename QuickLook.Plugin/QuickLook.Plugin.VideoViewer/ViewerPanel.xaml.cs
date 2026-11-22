@@ -51,7 +51,6 @@ public partial class ViewerPanel : UserControl, IDisposable, INotifyPropertyChan
     private DispatcherTimer _lyricTimer;
     private LrcLine[] _lyricLines;
     private MidiPlayer _midiPlayer;
-    private Window _parentWindow;
 
     private bool _hasVideo;
     private bool _isPlaying;
@@ -112,8 +111,9 @@ public partial class ViewerPanel : UserControl, IDisposable, INotifyPropertyChan
 
         PreviewMouseWheel += (_, e) => ChangeVolume(e.Delta / 120d * 0.04d);
 
-        Loaded += ViewerPanel_Loaded;
-        Unloaded += ViewerPanel_Unloaded;
+        Focusable = true;
+        Loaded += (_, _) => Focus();
+        PreviewKeyDown += ViewerPanel_PreviewKeyDown;
     }
 
     private partial void LoadAndInsertGlassLayer();
@@ -176,8 +176,6 @@ public partial class ViewerPanel : UserControl, IDisposable, INotifyPropertyChan
 
     public void Dispose()
     {
-        DetachParentWindowEvents();
-
         // old plugin use an int-typed "Volume" config key ranged from 0 to 100. Let's use a new one here.
         SettingHelper.Set("VolumeDouble", LinearVolume, "QuickLook.Plugin.VideoViewer");
         SettingHelper.Set("ShouldLoop", ShouldLoop, "QuickLook.Plugin.VideoViewer");
@@ -205,43 +203,27 @@ public partial class ViewerPanel : UserControl, IDisposable, INotifyPropertyChan
         _midiPlayer = null;
     }
 
-    private void ViewerPanel_Loaded(object sender, RoutedEventArgs e)
+    private void Panel_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        DetachParentWindowEvents();
+        Focus();
 
-        _parentWindow = Window.GetWindow(this);
-        if (_parentWindow != null)
-            _parentWindow.PreviewKeyDown += ParentWindow_PreviewKeyDown;
-    }
-
-    private void ViewerPanel_Unloaded(object sender, RoutedEventArgs e)
-    {
-        DetachParentWindowEvents();
-    }
-
-    private void DetachParentWindowEvents()
-    {
-        if (_parentWindow != null)
+        if (e.LeftButton == MouseButtonState.Pressed)
         {
-            _parentWindow.PreviewKeyDown -= ParentWindow_PreviewKeyDown;
-            _parentWindow = null;
+            var wnd = Window.GetWindow(this);
+            // Do not allow dragging when window is borderless (e.g. fullscreen)
+            if (wnd?.WindowStyle == WindowStyle.None)
+                return;
+
+            wnd?.DragMove();
         }
     }
 
-    private void ParentWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    private void ViewerPanel_PreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (mediaElement == null || mediaElement.Source == null)
-            return;
-
         bool isRightShiftOnly =
+            Keyboard.Modifiers == ModifierKeys.Shift &&
             Keyboard.IsKeyDown(Key.RightShift) &&
-            !Keyboard.IsKeyDown(Key.LeftShift) &&
-            !Keyboard.IsKeyDown(Key.LeftCtrl) &&
-            !Keyboard.IsKeyDown(Key.RightCtrl) &&
-            !Keyboard.IsKeyDown(Key.LeftAlt) &&
-            !Keyboard.IsKeyDown(Key.RightAlt) &&
-            !Keyboard.IsKeyDown(Key.LWin) &&
-            !Keyboard.IsKeyDown(Key.RWin);
+            !Keyboard.IsKeyDown(Key.LeftShift);
 
         if (!isRightShiftOnly)
             return;
@@ -249,13 +231,13 @@ public partial class ViewerPanel : UserControl, IDisposable, INotifyPropertyChan
         switch (e.Key)
         {
             case Key.Left:
-                SeekBySeconds(-3d);
+                Seek(-TimeSpan.FromSeconds(3).Ticks);
                 ShowViedoControlContainer(null, null);
                 e.Handled = true;
                 break;
 
             case Key.Right:
-                SeekBySeconds(3d);
+                Seek(TimeSpan.FromSeconds(3).Ticks);
                 ShowViedoControlContainer(null, null);
                 e.Handled = true;
                 break;
@@ -271,33 +253,19 @@ public partial class ViewerPanel : UserControl, IDisposable, INotifyPropertyChan
         }
     }
 
-    private void SeekBySeconds(double seconds)
+    private void Seek(long deltaTicks)
     {
-        if (mediaElement == null || mediaElement.Source == null)
+        if (mediaElement == null)
             return;
 
-        long targetPosition = mediaElement.MediaPosition + TimeSpan.FromSeconds(seconds).Ticks;
-        if (targetPosition < 0L)
-            targetPosition = 0L;
+        var target = mediaElement.MediaPosition + deltaTicks;
+        if (target < 0L)
+            target = 0L;
 
-        long duration = mediaElement.MediaDuration;
-        if (duration > 0L && targetPosition > duration)
-            targetPosition = duration;
+        if (mediaElement.MediaDuration > 0L && target > mediaElement.MediaDuration)
+            target = mediaElement.MediaDuration;
 
-        mediaElement.MediaPosition = targetPosition;
-    }
-
-    private void Panel_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.LeftButton == MouseButtonState.Pressed)
-        {
-            var wnd = Window.GetWindow(this);
-            // Do not allow dragging when window is borderless (e.g. fullscreen)
-            if (wnd?.WindowStyle == WindowStyle.None)
-                return;
-
-            wnd?.DragMove();
-        }
+        mediaElement.MediaPosition = target;
     }
 
     public event PropertyChangedEventHandler PropertyChanged;
