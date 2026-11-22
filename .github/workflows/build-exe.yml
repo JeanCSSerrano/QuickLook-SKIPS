@@ -8,13 +8,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
       - uses: microsoft/setup-msbuild@v2
-      - name: Skip Installer and ARM64 Projects
+      - name: Prepare Solution and Version Tag
         shell: powershell
         run: |
           [xml]$slnx = Get-Content QuickLook.slnx
           $slnx.SelectNodes("//Project[contains(@Path, 'QuickLook.Installer') or contains(@Path, 'NativeArm64')]") | ForEach-Object { [void]$_.ParentNode.RemoveChild($_) }
           $slnx.Save("$PWD\QuickLook.slnx")
+
+          $tag = git tag --merged HEAD | Select-Object -First 1
+          if (-not $tag) {
+            git -c user.name="QuickLook" -c user.email="build@local" tag -a 4.0.0 -m "Custom build"
+          }
       - name: Build Full QuickLook
         run: msbuild QuickLook.slnx -restore -p:Configuration=Release -p:Platform="Any CPU" -m
       - name: Package QuickLook Folder
